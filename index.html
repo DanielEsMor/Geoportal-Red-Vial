@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Geovisor de Vialidad Avanzado</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css">
+    <style>
+        body, html { margin: 0; padding: 0; height: 100%; width: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; overflow: hidden; }
+        .geovisor-container { display: flex; height: 100%; width: 100%; }
+        .panel { background: #f8f9fa; padding: 15px; box-shadow: 0 0 10px rgba(0,0,0,0.1); z-index: 1000; display: flex; flex-direction: column; }
+        #left-panel { width: 250px; }
+        #right-panel { width: 280px; }
+        #map-container { flex-grow: 1; height: 100%; }
+        #map { height: 100%; width: 100%; }
+        .panel h3 { margin: 0 0 15px; font-size: 1.2em; color: #333; text-align: center; border-bottom: 1px solid #ddd; padding-bottom: 10px; }
+        .panel select, .panel button { width: 100%; padding: 10px; margin-bottom: 10px; border-radius: 5px; border: 1px solid #ccc; font-size: 1em; background-color: #fff; box-sizing: border-box; }
+        .panel button:disabled { background-color: #e9ecef; cursor: not-allowed; color: #6c757d; border-color: #ddd;}
+        #filter-btn { background-color: #007bff; color: white; font-weight: bold; border: none; cursor: pointer; transition: background-color 0.3s; }
+        #filter-btn:hover:not(:disabled) { background-color: #0056b3; }
+        #btn-create-report { background-color: #28a745; color: white; border: none; cursor: pointer; }
+        .layer-control label { display: block; margin-bottom: 10px; font-size: 1em; user-select: none; }
+        .layer-control input { margin-right: 10px; }
+        .legend p { display: flex; align-items: center; margin-bottom: 8px; font-size: 14px; }
+        .legend i { width: 20px; height: 20px; float: left; margin-right: 8px; opacity: 0.9; border: 1px solid #555; display: flex; align-items: center; justify-content: center; font-style: normal; font-size: 16px; }
+        #loader { position: fixed; top: 50%; left: 50%; z-index: 2000; transform: translate(-50%, -50%); background-color: rgba(0, 0, 0, 0.7); color: white; padding: 20px 40px; border-radius: 10px; }
+        #table-container { position: fixed; bottom: 0; left: 250px; right: 280px; max-height: 35%; background-color: #fff; box-shadow: 0 -2px 10px rgba(0,0,0,0.2); z-index: 1001; display: none; flex-direction: column; }
+        .table-header { padding: 10px 15px; background-color: #f8f9fa; font-weight: bold; border-bottom: 2px solid #dee2e6; }
+        .table-content { overflow-y: auto; }
+        #data-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        #data-table th, #data-table td { padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }
+        #data-table th { background-color: #f2f2f2; position: sticky; top: 0; }
+        
+        /* Estilo para los iconos emoji de Leaflet */
+        .novedad-icon-div {
+            font-size: 24px;
+            text-align: center;
+            line-height: 24px;
+            background: none;
+            border: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="geovisor-container">
+        <!-- Panel Izquierdo: Leyenda y Control de Capas -->
+        <div id="left-panel" class="panel">
+            <h3>Capas</h3>
+            <div class="layer-control">
+                <label><input type="checkbox" id="toggle-filtro" checked> Límite de Filtro</label>
+                <label><input type="checkbox" id="toggle-vias" checked> Vías</label>
+                <label><input type="checkbox" id="toggle-novedades" checked> Vías con Novedad</label>
+                <label><input type="checkbox" id="toggle-poblados" checked> Poblados</label>
+            </div>
+            <h3 style="margin-top: 20px;">Leyenda</h3>
+            <div class="legend">
+                <p><i style="background:rgba(253, 126, 20, 0.2); border-color: #fd7e14;"></i> Límite de Filtro</p>
+                <p><i style="background:black;"></i> Vías</p>
+                <p><i style="background:red;"></i> Vías con Novedad</p>
+                <p><i>🕳️</i> Bache / Hundimiento</p>
+                <p><i>⛰️</i> Deslizamiento</p>
+                <p><i>🛑</i> Señalización / Otro</p>
+                <p><i style="background:#ff7f00;"></i> Poblados</p>
+            </div>
+        </div>
+
+        <!-- Contenedor Central: Mapa -->
+        <div id="map-container"><div id="map"></div></div>
+
+        <!-- Panel Derecho: Herramientas -->
+        <div id="right-panel" class="panel">
+            <h3>Herramientas</h3>
+            <label>Provincia</label>
+            <select id="provincia-select"><option value="">-- Seleccione --</option></select>
+            <label>Cantón</label>
+            <select id="canton-select" disabled><option value="all">-- Todos los Cantones --</option></select>
+            <button id="filter-btn" disabled>Filtrar en Mapa</button>
+            <hr style="border-top: 1px solid #ddd; margin: 15px 0;">
+            <button id="btn-create-report">➕ Crear Nuevo Reporte</button>
+        </div>
+    </div>
+
+    <!-- Tabla Inferior -->
+    <div id="table-container">
+        <div class="table-header">Detalle de Vías con Novedad</div>
+        <div class="table-content"><table id="data-table"><thead><tr><th>NOMBRE</th><th>Via</th><th>Estado</th><th>Observacion</th><th>Via Alter</th><th>CODIGO VIA</th><th>NOMBRE VIA</th></tr></thead><tbody id="table-body"></tbody></table></div>
+    </div>
+    
+    <div id="loader" style="display:none;">Cargando...</div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
+    <script>
+        // --- 1. CONFIGURACIÓN E INICIALIZACIÓN ---
+        const SUPABASE_URL = 'https://bsbxhblbheobgxfownsg.supabase.co';
+        const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJzYnhoYmxiaGVvYmd4Zm93bnNnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTA4ODgwOTYsImV4cCI6MjA2NjQ2NDA5Nn0.00XlcrqVu_OWgcNCFXegZvl6tvRcCMzKTAylqzPc43k';
+        const supabaseClient = { rpc: async(f, p={})=> {const r=await fetch(`${SUPABASE_URL}/rest/v1/rpc/${f}`,{method:'POST',headers:{'Content-Type':'application/json',apikey:SUPABASE_KEY,Authorization:`Bearer ${SUPABASE_KEY}`},body:JSON.stringify(p)});if(!r.ok){const e=await r.json();throw new Error(e.message||`Error`)}return await r.json()} };
+
+        const map = L.map('map').setView([-1.8312, -78.1834], 7);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { attribution: '© OpenStreetMap © CARTO', maxZoom: 19 }).addTo(map);
+        
+        map.createPane('viasPane').style.zIndex = 450;
+        map.createPane('novedadesPane').style.zIndex = 460;
+
+        const loader = document.getElementById('loader');
+        const tableContainer = document.getElementById('table-container');
+
+        // --- 2. ESTILOS, CAPAS E ICONOS ---
+        const styles = {
+            filtro: { color: '#fd7e14', weight: 3, opacity: 1, fill: true, fillOpacity: 0.1, dashArray: '5, 5' },
+            vias: { color: 'black', weight: 2, opacity: 0.7, pane: 'viasPane' },
+            viasConNovedad: { color: 'red', weight: 3, opacity: 0.9, pane: 'viasPane' },
+            poblados: { radius: 5, fillColor: '#ff7f00', color: '#000', weight: 1, opacity: 1, fillOpacity: 0.8 },
+        };
+        
+        const novedadIcons = {
+            'Bache': '🕳️', 'Hundimiento': '📉', 'Deslizamiento': '⛰️', 'Señalización dañada': '🛑', 'Otro': '❓'
+        };
+
+        function getNovedadIcon(tipoNovedad) {
+            const emoji = novedadIcons[tipoNovedad] || novedadIcons['Otro'];
+            return L.divIcon({
+                html: `<div class="novedad-icon-div">${emoji}</div>`,
+                className: '', // Sin clase de fondo por defecto
+                iconSize: [24, 24],
+                iconAnchor: [12, 24]
+            });
+        }
+
+        const layers = {
+            filtro: L.featureGroup().addTo(map),
+            vias: L.featureGroup().addTo(map),
+            novedades: L.featureGroup().addTo(map),
+            poblados: L.featureGroup().addTo(map)
+        };
+
+        // --- 3. LÓGICA DE HERRAMIENTAS (PANEL DERECHO) ---
+        const provinciaSelect = document.getElementById('provincia-select');
+        const cantonSelect = document.getElementById('canton-select');
+        const filterBtn = document.getElementById('filter-btn');
+
+        async function loadProvincias() {
+            const provincias = await supabaseClient.rpc('get_provincias');
+            provincias.forEach(p => provinciaSelect.appendChild(new Option(p.nombre_provincia, p.nombre_provincia)));
+        }
+
+        provinciaSelect.addEventListener('change', async function () {
+            const provincia = this.value;
+            cantonSelect.innerHTML = '<option value="all">-- Todos los Cantones --</option>';
+            if (provincia) {
+                loader.style.display = 'block';
+                const cantones = await supabaseClient.rpc('get_cantones', { p_provincia: provincia });
+                cantones.forEach(c => cantonSelect.appendChild(new Option(c.nombre_canton, c.nombre_canton)));
+                cantonSelect.disabled = false;
+                filterBtn.disabled = false;
+                loader.style.display = 'none';
+            } else {
+                cantonSelect.disabled = true;
+                filterBtn.disabled = true;
+            }
+        });
+
+        filterBtn.addEventListener('click', function() {
+            loadFilteredData(provinciaSelect.value, cantonSelect.value);
+        });
+        
+        async function loadFilteredData(provincia, canton) {
+            loader.style.display = 'block';
+            Object.values(layers).forEach(layer => layer.clearLayers());
+            updateNovedadesTable([]);
+            
+            const p_canton = (canton === 'all') ? null : canton;
+
+            try {
+                const geojsonData = await supabaseClient.rpc('get_datos_geovisor', { p_provincia: provincia, p_canton: p_canton });
+                
+                // Añadir capas al mapa
+                addGeoJsonToLayer(geojsonData.filtro_geom, layers.filtro, styles.filtro, 'Límite', false, true);
+                addGeoJsonToLayer(geojsonData.vias, layers.vias, styles.vias, 'Vía');
+                
+                // Añadir poblados como puntos (circleMarker)
+                if (geojsonData.poblados) {
+                    const pobladosLayer = L.featureGroup();
+                    geojsonData.poblados.features.forEach(feature => {
+                        if (feature.geometry.type === 'Point') {
+                            const marker = L.circleMarker(
+                                [feature.geometry.coordinates[1], feature.geometry.coordinates[0]], 
+                                styles.poblados
+                            );
+                            if (feature.properties) {
+                                let p = `<div class="popup-content"><strong>Poblado: ${feature.properties.nombre||feature.properties.NOMBRE||''}</strong>`;
+                                for(const k in feature.properties) { 
+                                    if(Object.prototype.hasOwnProperty.call(feature.properties,k)) { 
+                                        p += `<b>${k}:</b> ${feature.properties[k]}<br>` 
+                                    } 
+                                }
+                                marker.bindPopup(p + '</div>');
+                            }
+                            pobladosLayer.addLayer(marker);
+                        }
+                    });
+                    layers.poblados.addLayer(pobladosLayer);
+                }
+                
+                // Procesar shp_enriquecido (vías con novedad)
+                if (geojsonData.shp_enriquecido) {
+                    // Añadir líneas rojas para vías con novedad
+                    addGeoJsonToLayer(geojsonData.shp_enriquecido, layers.novedades, styles.viasConNovedad, 'Vía con Novedad');
+                    
+                    // Añadir marcadores de novedades
+                    const novedadesLayer = L.featureGroup();
+                    geojsonData.shp_enriquecido.features.forEach(feature => {
+                        if (feature.geometry.type === 'Point') {
+                            const tipo = feature.properties.tipo_novedad || feature.properties.Estado || 'Otro';
+                            const marker = L.marker(
+                                [feature.geometry.coordinates[1], feature.geometry.coordinates[0]], 
+                                { icon: getNovedadIcon(tipo), pane: 'novedadesPane' }
+                            );
+                            if (feature.properties) {
+                                let p = `<div class="popup-content"><strong>Vía con Novedad: ${feature.properties.nombre||feature.properties.NOMBRE||''}</strong>`;
+                                for(const k in feature.properties) { 
+                                    if(Object.prototype.hasOwnProperty.call(feature.properties,k)) { 
+                                        p += `<b>${k}:</b> ${feature.properties[k]}<br>` 
+                                    } 
+                                }
+                                marker.bindPopup(p + '</div>');
+                            }
+                            novedadesLayer.addLayer(marker);
+                        }
+                    });
+                    layers.novedades.addLayer(novedadesLayer);
+                }
+                
+                updateNovedadesTable(geojsonData.shp_enriquecido?.features || []);
+                
+                if (layers.filtro.getLayers().length > 0) map.fitBounds(layers.filtro.getBounds());
+                else Swal.fire('Sin Datos', 'No se encontraron datos para la selección actual.', 'warning');
+            } catch (error) { 
+                Swal.fire('Error de Carga', `No se pudieron cargar los datos. ${error.message}`, 'error'); 
+            } finally { 
+                loader.style.display = 'none'; 
+            }
+        }
+
+        function addGeoJsonToLayer(data, layer, style, layerName, isPoint = false, isSimpleGeom = false) {
+            if (!data) return;
+            const geoJsonData = isSimpleGeom ? { type: 'Feature', geometry: data } : data;
+            if (!geoJsonData.features && !isSimpleGeom) return;
+            
+            // Solo crear marcadores si es una capa de novedades y no estamos aplicando estilo de línea roja
+            const createMarkers = layerName === 'Vía con Novedad' && !style;
+            
+            const leafletLayer = L.geoJSON(geoJsonData, {
+                style: style,
+                pointToLayer: createMarkers ? (feature, latlng) => {
+                    const tipo = feature.properties.tipo_novedad || feature.properties.Estado || 'Otro';
+                    return L.marker(latlng, { icon: getNovedadIcon(tipo), pane: 'novedadesPane' });
+                } : undefined,
+                onEachFeature: (feature, layer) => {
+                    if (feature.properties) {
+                        let p = `<div class="popup-content"><strong>${layerName}: ${feature.properties.nombre||feature.properties.NOMBRE||''}</strong>`;
+                        for(const k in feature.properties) { 
+                            if(Object.prototype.hasOwnProperty.call(feature.properties,k)) { 
+                                p += `<b>${k}:</b> ${feature.properties[k]}<br>` 
+                            } 
+                        }
+                        layer.bindPopup(p + '</div>');
+                    }
+                }
+            });
+            layer.addLayer(leafletLayer);
+        }
+
+        function updateNovedadesTable(features) {
+            const tableBody = document.getElementById('table-body');
+            tableBody.innerHTML = '';
+            if (!features || features.length === 0) { tableContainer.style.display = 'none'; return; }
+            features.forEach(f => {
+                const p = f.properties;
+                const r = document.createElement('tr');
+                r.innerHTML = `<td>${p.nombre||p.NOMBRE||''}</td><td>${p.via||p.Via||''}</td><td>${p.estado||p.Estado||''}</td><td>${p.observacion||p.Observacio||''}</td><td>${p.Via_alter||p['Via Alter']||''}</td><td>${p.codio_via||p['CODIGO VIA']||''}</td><td>${p.nombre_via||p['NOMBRE VIA']||''}</td>`;
+                tableBody.appendChild(r);
+            });
+            tableContainer.style.display = 'flex';
+        }
+
+        // --- 4. LÓGICA DE CONTROL DE CAPAS ---
+        document.getElementById('toggle-filtro').addEventListener('change', (e) => toggleLayer(layers.filtro, e.target.checked));
+        document.getElementById('toggle-vias').addEventListener('change', (e) => toggleLayer(layers.vias, e.target.checked));
+        document.getElementById('toggle-novedades').addEventListener('change', (e) => toggleLayer(layers.novedades, e.target.checked));
+        document.getElementById('toggle-poblados').addEventListener('change', (e) => toggleLayer(layers.poblados, e.target.checked));
+        function toggleLayer(layer, isVisible) { if (isVisible) { map.addLayer(layer); } else { map.removeLayer(layer); } }
+
+        // --- 5. LÓGICA DE CREACIÓN DE REPORTES ---
+        let isCreatingReport = false;
+        let newReportMarker = null;
+
+        document.getElementById('btn-create-report').addEventListener('click', () => {
+            isCreatingReport = !isCreatingReport;
+            const createReportBtn = document.getElementById('btn-create-report');
+            if (isCreatingReport) {
+                createReportBtn.textContent = '✖️ Cancelar Reporte';
+                createReportBtn.style.backgroundColor = '#dc3545';
+                map.getContainer().style.cursor = 'crosshair';
+                Swal.fire({ title: 'Modo de Reporte Activado', text: 'Haz clic en el mapa para ubicar la novedad.', icon: 'info', toast: true, position: 'top-end', showConfirmButton: false, timer: 3000, timerProgressBar: true });
+            } else { cancelReportCreation(); }
+        });
+
+        map.on('click', function(e) {
+            if (isCreatingReport) {
+                if (newReportMarker) { newReportMarker.setLatLng(e.latlng); } 
+                else { newReportMarker = L.marker(e.latlng, { draggable: true }).addTo(map); }
+                showReportForm(e.latlng);
+            }
+        });
+
+        async function showReportForm(latlng) {
+            const { value: formValues, isConfirmed } = await Swal.fire({
+                title: 'Crear Nuevo Reporte Vial',
+                html: `<div style="text-align: left;"><label for="swal-tipo" style="display: block; margin-top: 10px;">Tipo de Novedad</label><select id="swal-tipo" class="swal2-select"><option value="Bache">Bache</option><option value="Hundimiento">Hundimiento</option><option value="Deslizamiento">Deslizamiento</option><option value="Señalización dañada">Señalización dañada</option><option value="Otro">Otro</option></select><label for="swal-estado" style="display: block; margin-top: 10px;">Estado de la Vía</label><select id="swal-estado" class="swal2-select"><option value="Buena">Buena</option><option value="Regular">Regular</option><option value="Mala">Mala</option><option value="Intransitable">Intransitable</option></select><label for="swal-via" style="display: block; margin-top: 10px;">Nombre o referencia de la Vía</label><input id="swal-via" class="swal2-input" placeholder="Ej: Vía a Papallacta, Km 5"><label for="swal-desc" style="display: block; margin-top: 10px;">Descripción Adicional</label><textarea id="swal-desc" class="swal2-textarea" placeholder="Describe brevemente la novedad..."></textarea></div>`,
+                focusConfirm: false, showCancelButton: true, confirmButtonText: 'Enviar Reporte', cancelButtonText: 'Cancelar',
+                preConfirm: () => ({ tipo: document.getElementById('swal-tipo').value, estado: document.getElementById('swal-estado').value, via: document.getElementById('swal-via').value, descripcion: document.getElementById('swal-desc').value })
+            });
+            if (isConfirmed && formValues) {
+                if (!formValues.via || !formValues.descripcion) { 
+                    Swal.fire('Campos incompletos', 'Por favor, completa el nombre de la vía y la descripción.', 'warning'); 
+                    if (newReportMarker) newReportMarker.remove(); 
+                    newReportMarker = null; 
+                } else { 
+                    submitReport(formValues, latlng); 
+                }
+            } else { 
+                if (newReportMarker) newReportMarker.remove(); 
+                newReportMarker = null; 
+            }
+            cancelReportCreation();
+        }
+
+        async function submitReport(formData, latlng) {
+             loader.style.display = 'block';
+             const geojsonPoint = { type: 'Point', coordinates: [latlng.lng, latlng.lat] };
+             try {
+                const result = await supabaseClient.rpc('crear_reporte_via', { 
+                    p_tipo_novedad: formData.tipo, 
+                    p_estado_via: formData.estado, 
+                    p_descripcion: formData.descripcion, 
+                    p_via_nombre: formData.via, 
+                    p_geom_geojson: JSON.stringify(geojsonPoint) 
+                });
+                if (result.status === 'success') {
+                    Swal.fire('¡Reporte Enviado!', `Tu reporte ha sido creado con éxito (ID: ${result.id}).`, 'success');
+                    const newReportProps = { 
+                        id: result.id, 
+                        tipo_novedad: formData.tipo, 
+                        estado_via: formData.estado, 
+                        descripcion: formData.descripcion, 
+                        via_nombre: formData.via, 
+                        fecha_hora: new Date().toISOString() 
+                    };
+                    addSingleReportToMap(geojsonPoint, newReportProps);
+                } else { 
+                    throw new Error(result.message); 
+                }
+             } catch (error) { 
+                Swal.fire('Error', `No se pudo enviar el reporte. ${error.message}`, 'error'); 
+             } finally { 
+                loader.style.display = 'none'; 
+                if (newReportMarker) newReportMarker.remove(); 
+                newReportMarker = null; 
+             }
+        }
+        
+        function addSingleReportToMap(geometry, properties) {
+            const latLng = [geometry.coordinates[1], geometry.coordinates[0]];
+            const marker = L.marker(latLng, { icon: getNovedadIcon(properties.tipo_novedad), pane: 'novedadesPane' });
+            let p = `<div class="popup-content"><strong>Vía con Novedad: ${properties.id}</strong>`;
+            for(const k in properties) { 
+                if(Object.prototype.hasOwnProperty.call(properties,k)) { 
+                    p += `<b>${k}:</b> ${properties[k]}<br>` 
+                } 
+            }
+            marker.bindPopup(p + '</div>');
+            layers.novedades.addLayer(marker);
+        }
+
+        function cancelReportCreation() {
+            isCreatingReport = false;
+            const createReportBtn = document.getElementById('btn-create-report');
+            createReportBtn.textContent = '➕ Crear Nuevo Reporte';
+            createReportBtn.style.backgroundColor = '#28a745';
+            map.getContainer().style.cursor = '';
+            if (newReportMarker) { newReportMarker.remove(); newReportMarker = null; }
+        }
+
+        // --- 6. LLAMADAS INICIALES ---
+        loadProvincias();
+    </script>
+</body>
+</html>
